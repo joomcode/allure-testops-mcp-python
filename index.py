@@ -20,7 +20,6 @@ from csv_parser import parse_test_cases_from_csv
 # Environment variables
 ALLURE_TESTOPS_URL = os.environ.get('ALLURE_TESTOPS_URL')
 ALLURE_TOKEN = os.environ.get('ALLURE_TOKEN')
-PROJECT_ID = os.environ.get('PROJECT_ID')
 MCP_TRANSPORT = os.environ.get('MCP_TRANSPORT', 'stdio')  # stdio or streamable_http
 MCP_ADDRESS = os.environ.get('MCP_ADDRESS', '0.0.0.0:8000')  # host:port
 
@@ -31,10 +30,6 @@ if not ALLURE_TOKEN:
 
 if not ALLURE_TESTOPS_URL:
     print('Error: ALLURE_TESTOPS_URL environment variable is required', file=sys.stderr)
-    sys.exit(1)
-
-if not PROJECT_ID:
-    print('Error: PROJECT_ID environment variable is required', file=sys.stderr)
     sys.exit(1)
 
 # Initialize Allure client
@@ -48,9 +43,11 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'page': {'type': 'number', 'description': 'Page number (optional)'},
                 'size': {'type': 'number', 'description': 'Page size (optional)'},
             },
+            'required': ['project_id'],
         },
     ),
     Tool(
@@ -70,12 +67,13 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'name': {'type': 'string', 'description': 'Test case name'},
                 'description': {'type': 'string', 'description': 'Test case description'},
                 'status': {'type': 'string', 'description': 'Test case status'},
                 'automated': {'type': 'boolean', 'description': 'Is automated'},
             },
-            'required': ['name'],
+            'required': ['project_id', 'name'],
         },
     ),
     Tool(
@@ -110,9 +108,10 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'csv_content': {'type': 'string', 'description': 'CSV file content'},
             },
-            'required': ['csv_content'],
+            'required': ['project_id', 'csv_content'],
         },
     ),
     Tool(
@@ -121,9 +120,11 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'page': {'type': 'number', 'description': 'Page number (optional)'},
                 'size': {'type': 'number', 'description': 'Page size (optional)'},
             },
+            'required': ['project_id'],
         },
     ),
     Tool(
@@ -143,10 +144,11 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'name': {'type': 'string', 'description': 'Launch name'},
                 'closed': {'type': 'boolean', 'description': 'Is closed'},
             },
-            'required': ['name'],
+            'required': ['project_id', 'name'],
         },
     ),
     Tool(
@@ -190,9 +192,11 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'page': {'type': 'number', 'description': 'Page number (optional)'},
                 'size': {'type': 'number', 'description': 'Page size (optional)'},
             },
+            'required': ['project_id'],
         },
     ),
     Tool(
@@ -212,10 +216,11 @@ all_tools: List[Tool] = [
         inputSchema={
             'type': 'object',
             'properties': {
+                'project_id': {'type': 'string', 'description': 'Project ID'},
                 'name': {'type': 'string', 'description': 'Test plan name'},
                 'description': {'type': 'string', 'description': 'Test plan description'},
             },
-            'required': ['name'],
+            'required': ['project_id', 'name'],
         },
     ),
     Tool(
@@ -258,7 +263,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
     try:
         if name == 'list_test_cases':
             params = arguments or {}
-            result = await allure_client.get_test_cases(PROJECT_ID, params)
+            project_id = params.pop('project_id')
+            result = await allure_client.get_test_cases(project_id, params)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'get_test_case':
@@ -267,8 +273,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'create_test_case':
+            project_id = arguments.pop('project_id')
             test_case = {k: v for k, v in arguments.items()}
-            result = await allure_client.create_test_case(PROJECT_ID, test_case)
+            result = await allure_client.create_test_case(project_id, test_case)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'update_test_case':
@@ -283,14 +290,16 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return [TextContent(type="text", text=f"Test case {test_case_id} deleted successfully")]
 
         elif name == 'bulk_create_test_cases_from_csv':
+            project_id = arguments.get('project_id')
             csv_content = arguments.get('csv_content')
             test_cases = parse_test_cases_from_csv(csv_content)
-            results = await allure_client.bulk_create_test_cases(PROJECT_ID, test_cases)
+            results = await allure_client.bulk_create_test_cases(project_id, test_cases)
             return [TextContent(type="text", text=json.dumps(results, indent=2))]
 
         elif name == 'list_launches':
             params = arguments or {}
-            result = await allure_client.get_launches(PROJECT_ID, params)
+            project_id = params.pop('project_id')
+            result = await allure_client.get_launches(project_id, params)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'get_launch':
@@ -299,8 +308,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'create_launch':
+            project_id = arguments.pop('project_id')
             launch = {k: v for k, v in arguments.items()}
-            result = await allure_client.create_launch(PROJECT_ID, launch)
+            result = await allure_client.create_launch(project_id, launch)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'update_launch':
@@ -321,7 +331,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
         elif name == 'list_test_plans':
             params = arguments or {}
-            result = await allure_client.get_test_plans(PROJECT_ID, params)
+            project_id = params.pop('project_id')
+            result = await allure_client.get_test_plans(project_id, params)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'get_test_plan':
@@ -330,8 +341,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'create_test_plan':
+            project_id = arguments.pop('project_id')
             test_plan = {k: v for k, v in arguments.items()}
-            result = await allure_client.create_test_plan(PROJECT_ID, test_plan)
+            result = await allure_client.create_test_plan(project_id, test_plan)
             return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
         elif name == 'update_test_plan':
@@ -467,7 +479,6 @@ if __name__ == "__main__":
     print(f"Allure TestOps MCP Server", file=sys.stderr)
     print(f"Transport: {MCP_TRANSPORT}", file=sys.stderr)
     print(f"Connected to: {ALLURE_TESTOPS_URL}", file=sys.stderr)
-    print(f"Project ID: {PROJECT_ID}", file=sys.stderr)
     print(f"Registered {len(all_tools)} tools", file=sys.stderr)
 
     if MCP_TRANSPORT == 'stdio':
