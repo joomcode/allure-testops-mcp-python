@@ -52,6 +52,8 @@ Create a `.env` file in the project root:
 ALLURE_TESTOPS_URL=https://your-allure-instance.com
 ALLURE_TOKEN=your-api-token
 PROJECT_ID=1
+MCP_TRANSPORT=stdio
+MCP_ADDRESS=0.0.0.0:8000
 ```
 
 **Note:** Never commit `.env` files to version control. Use `.env.example` as a template.
@@ -60,13 +62,34 @@ PROJECT_ID=1
 
 ### Running the MCP Server
 
-Run the server directly:
+#### Stdio Mode (Default)
+
+Run the server in stdio mode (default):
 
 ```bash
 python index.py
+# or explicitly:
+python index.py --transport stdio
 ```
 
 The server will run on stdio and communicate via the Model Context Protocol.
+
+#### HTTP Streamable Mode
+
+Run the server in HTTP Streamable mode using environment variables:
+
+```bash
+export MCP_TRANSPORT=streamable_http
+export MCP_ADDRESS=0.0.0.0:8000
+python index.py
+```
+
+The server will be available at `http://localhost:8000` (or the specified address).
+
+### Environment Variables
+
+- `MCP_TRANSPORT`: Transport mode (`stdio` or `streamable_http`). Default: `stdio`
+- `MCP_ADDRESS`: Host and port in format `host:port`. Default: `0.0.0.0:8000`
 
 ### Standalone Scripts
 

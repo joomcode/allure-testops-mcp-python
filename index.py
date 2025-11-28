@@ -11,6 +11,7 @@ import sys
 from typing import Any, Dict, List
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 from mcp.types import Tool, TextContent
 
 from allure_client import AllureClient, create_allure_client
@@ -20,6 +21,8 @@ from csv_parser import parse_test_cases_from_csv
 ALLURE_TESTOPS_URL = os.environ.get('ALLURE_TESTOPS_URL')
 ALLURE_TOKEN = os.environ.get('ALLURE_TOKEN')
 PROJECT_ID = os.environ.get('PROJECT_ID')
+MCP_TRANSPORT = os.environ.get('MCP_TRANSPORT', 'stdio')  # stdio or streamable_http
+MCP_ADDRESS = os.environ.get('MCP_ADDRESS', '0.0.0.0:8000')  # host:port
 
 # Validate required environment variables
 if not ALLURE_TOKEN:
@@ -352,8 +355,8 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             error_message += f"\n{error.response.text}"
         return [TextContent(type="text", text=f"Error: {error_message}")]
 
-async def main():
-    """Main function to run the server"""
+async def main_stdio():
+    """Main function to run the server in stdio mode"""
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,
@@ -361,9 +364,127 @@ async def main():
             server.create_initialization_options()
         )
 
+async def main_streamable_http(host: str, port: int):
+    """Main function to run the server in Streamable HTTP mode
+    
+    Note: Streamable HTTP transport is complex and requires proper session management.
+    For production use, consider using stdio transport or implementing full session lifecycle.
+    """
+    import uvicorn
+
+    # Single global transport instance
+    transport = StreamableHTTPServerTransport(
+        mcp_session_id=None,
+        is_json_response_enabled=False
+    )
+
+    # Track if server is initialized
+    server_initialized = asyncio.Event()
+    server_task = None
+
+    async def init_mcp_server():
+        """Initialize MCP server once at startup"""
+        async with transport.connect() as (read_stream, write_stream):
+            server_initialized.set()
+            await server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+                stateless=True
+            )
+
+    async def asgi_app(scope, receive, send):
+        """ASGI application handler"""
+        nonlocal server_task
+
+        if scope["type"] == "lifespan":
+            while True:
+                message = await receive()
+                if message["type"] == "lifespan.startup":
+                    server_task = asyncio.create_task(init_mcp_server())
+                    await server_initialized.wait()
+                    await send({"type": "lifespan.startup.complete"})
+                elif message["type"] == "lifespan.shutdown":
+                    if server_task:
+                        server_task.cancel()
+                        try:
+                            await server_task
+                        except asyncio.CancelledError:
+                            pass
+                    await send({"type": "lifespan.shutdown.complete"})
+                    return
+
+        elif scope["type"] == "http":
+            path = scope.get("path", "")
+
+            if path == "/health/liveness":
+                await send({
+                    "type": "http.response.start",
+                    "status": 200,
+                    "headers": [[b"content-type", b"application/json"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps({"status": "alive"}).encode("utf-8"),
+                })
+                return
+
+            elif path == "/health/readiness":
+                is_ready = server_initialized.is_set()
+
+                status_code = 200 if is_ready else 503
+                await send({
+                    "type": "http.response.start",
+                    "status": status_code,
+                    "headers": [[b"content-type", b"application/json"]],
+                })
+                await send({
+                    "type": "http.response.body",
+                    "body": json.dumps({
+                        "status": "ready" if is_ready else "not_ready",
+                        "server_initialized": server_initialized.is_set(),
+                    }).encode("utf-8"),
+                })
+                return
+
+            if not server_initialized.is_set():
+                await server_initialized.wait()
+
+            await transport.handle_request(scope, receive, send)
+
+    config = uvicorn.Config(
+        app=asgi_app,
+        host=host,
+        port=port,
+        log_level="info",
+        lifespan="on"
+    )
+    server_instance = uvicorn.Server(config)
+    await server_instance.serve()
+
+
 if __name__ == "__main__":
-    print("Allure TestOps MCP Server running on stdio", file=sys.stderr)
+    print(f"Allure TestOps MCP Server", file=sys.stderr)
+    print(f"Transport: {MCP_TRANSPORT}", file=sys.stderr)
     print(f"Connected to: {ALLURE_TESTOPS_URL}", file=sys.stderr)
     print(f"Project ID: {PROJECT_ID}", file=sys.stderr)
     print(f"Registered {len(all_tools)} tools", file=sys.stderr)
-    asyncio.run(main())
+
+    if MCP_TRANSPORT == 'stdio':
+        print("Running on stdio", file=sys.stderr)
+        asyncio.run(main_stdio())
+    elif MCP_TRANSPORT == 'streamable_http':
+        # Parse host:port from MCP_ADDRESS
+        if ':' in MCP_ADDRESS:
+            host, port_str = MCP_ADDRESS.rsplit(':', 1)
+            port = int(port_str)
+        else:
+            host = MCP_ADDRESS
+            port = 8000
+        print(f"Running on streamable_http at http://{host}:{port}", file=sys.stderr)
+        asyncio.run(main_streamable_http(host, port))
+    else:
+        print(f"Error: Unknown transport mode: {MCP_TRANSPORT}", file=sys.stderr)
+        print("Supported modes: stdio, streamable_http", file=sys.stderr)
+        print("Set MCP_TRANSPORT environment variable to 'stdio' or 'streamable_http'", file=sys.stderr)
+        sys.exit(1)
