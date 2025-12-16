@@ -112,8 +112,39 @@ class AllureClient:
         return await self.get("/api/rs/testcase", query_params)
     
     async def get_test_case(self, test_case_id: int) -> Any:
-        """Get a specific test case by ID"""
-        return await self.get(f"/api/rs/testcase/{test_case_id}")
+        """Get a specific test case by ID with overview (extended information)"""
+        return await self.get(f"/api/testcase/{test_case_id}/overview")
+    
+    async def get_test_case_scenario(self, test_case_id: int) -> Any:
+        """Get scenario (steps) for a test case"""
+        return await self.get(f"/api/testcase/{test_case_id}/step")
+    
+    async def create_test_case_step(
+        self, 
+        body: Dict[str, Any],
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        with_expected_result: bool = False
+    ) -> Any:
+        """Create a test case step
+        
+        Args:
+            body: Step body containing testCaseId and either bodyJson (for text) or attachmentId
+            after_id: Insert step after this step ID (mutually exclusive with before_id)
+            before_id: Insert step before this step ID (mutually exclusive with after_id)
+            with_expected_result: Include expected result section
+        
+        Returns:
+            Created step object
+        """
+        params = {}
+        if after_id is not None:
+            params['afterId'] = after_id
+        if before_id is not None:
+            params['beforeId'] = before_id
+        params['withExpectedResult'] = str(with_expected_result).lower()
+        
+        return await self.post("/api/testcase/step", body, params)
     
     async def create_test_case(self, project_id: str, test_case: Dict[str, Any]) -> Any:
         """Create a new test case"""
@@ -127,6 +158,44 @@ class AllureClient:
     async def delete_test_case(self, test_case_id: int) -> None:
         """Delete a test case"""
         await self.delete(f"/api/rs/testcase/{test_case_id}")
+    
+    async def get_test_case_custom_fields(self, test_case_id: int, project_id: str) -> Any:
+        """Get custom field values for a test case with v2 format
+        GET /api/testcase/:id/cfv?projectId=:project_id&v2=true
+        Returns list of custom fields with their current values
+        """
+        return await self.get(f"/api/testcase/{test_case_id}/cfv", {"projectId": project_id, "v2": "true"})
+    
+    async def get_available_custom_fields(self, project_id: int) -> Any:
+        """Get available custom fields for test cases in a project
+        POST /api/testcase/cfv
+        Body: { "projectId": int, "ids": [test_case_ids] }
+        Returns list of available custom fields with their schemas
+        """
+        body = {
+            "projectId": project_id
+        }
+        return await self.post("/api/testcase/cfv", body)
+    
+    async def update_test_case_custom_fields(self, test_case_id: int, custom_fields: List[Dict[str, Any]]) -> Any:
+        """Update custom field values for a test case
+        PATCH /api/testcase/{testCaseId}/cfv
+        Body: array of CustomFieldWithValuesDto
+        """
+        return await self.post(f"/api/testcase/{test_case_id}/cfv", custom_fields)
+    
+    async def get_custom_field_values(self, project_id: int, custom_field_id: int, size: int = 100, page: int = 0) -> Any:
+        """Get possible values for a custom field in a project
+        GET /api/project/:project_id/cfv?customFieldId=:id&size=100&page=0
+        Returns paginated list of available custom field values
+        """
+        params = {
+            "customFieldId": custom_field_id,
+            "size": size
+        }
+        if page > 0:
+            params["page"] = page
+        return await self.get(f"/api/project/{project_id}/cfv", params)
     
     async def bulk_create_test_cases(self, project_id: str, test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Bulk create test cases"""
@@ -192,6 +261,30 @@ class AllureClient:
     async def delete_test_plan(self, test_plan_id: int) -> None:
         """Delete a test plan"""
         await self.delete(f"/api/rs/testplan/{test_plan_id}")
+    
+    # Comments
+    async def get_comments(self, test_case_id: int, page: Optional[int] = None, size: Optional[int] = None) -> Any:
+        """Get comments for a test case
+        GET /api/comment?testCaseId=:id&page=0&size=25
+        page and size are optional, default size=10
+        """
+        params = {"testCaseId": test_case_id}
+        if page is not None:
+            params["page"] = page
+        if size is not None:
+            params["size"] = size
+        return await self.get("/api/comment", params)
+    
+    async def create_comment(self, test_case_id: int, body: str) -> Any:
+        """Create a comment for a test case
+        POST /api/comment
+        Body: {"testCaseId": int, "body": str}
+        """
+        comment_body = {
+            "testCaseId": test_case_id,
+            "body": body
+        }
+        return await self.post("/api/comment", comment_body)
 
 
 def create_allure_client(base_url: str, token: str) -> AllureClient:

@@ -125,28 +125,209 @@ Add to your `mcp.json` (typically located in `~/.cursor/mcp.json` or similar):
 
 ## Available Tools
 
+The server provides 10 tools organized by resource type and operation category.
+
 ### Test Cases
-- `list_test_cases` - List all test cases in the project
-- `get_test_case` - Get a specific test case by ID
-- `create_test_case` - Create a new test case
-- `update_test_case` - Update an existing test case
-- `delete_test_case` - Delete a test case
-- `bulk_create_test_cases_from_csv` - Bulk create test cases from CSV
+- `test_case_read` - Read test case data
+  - **method="list"** - List all test cases in a project with pagination
+  - **method="get"** - Get a specific test case by ID (includes scenario/steps)
+- `test_case_write` - Create, update, or delete test cases
+  - **method="create"** - Create a new test case
+  - **method="update"** - Update an existing test case
+  - **method="delete"** - Delete a test case
+- `test_case_step_create` - Create a test case step
+  - Supports text steps and attachment steps
+  - Can insert step before/after specific step ID
+  - Optional expected result section
 
 ### Launches
-- `list_launches` - List all launches in the project
-- `get_launch` - Get a specific launch by ID
-- `create_launch` - Create a new launch
-- `update_launch` - Update an existing launch
-- `delete_launch` - Delete a launch
-- `close_launch` - Close a launch
+- `launch_read` - Read launch data
+  - **method="list"** - List all launches in a project with pagination
+  - **method="get"** - Get a specific launch by ID
+- `launch_write` - Create, update, delete, or close launches
+  - **method="create"** - Create a new launch
+  - **method="update"** - Update an existing launch
+  - **method="delete"** - Delete a launch
+  - **method="close"** - Close a launch
 
 ### Test Plans
-- `list_test_plans` - List all test plans in the project
-- `get_test_plan` - Get a specific test plan by ID
-- `create_test_plan` - Create a new test plan
-- `update_test_plan` - Update an existing test plan
-- `delete_test_plan` - Delete a test plan
+- `test_plan_read` - Read test plan data
+  - **method="list"** - List all test plans in a project with pagination
+  - **method="get"** - Get a specific test plan by ID
+- `test_plan_write` - Create, update, or delete test plans
+  - **method="create"** - Create a new test plan
+  - **method="update"** - Update an existing test plan
+  - **method="delete"** - Delete a test plan
+
+### Special Operations
+- `bulk_create_test_cases_from_csv` - Bulk create test cases from CSV content
+- `test_case_custom_fields` - Get or modify custom field values
+  - **method="get"** - Get custom field values for a test case
+  - **method="modify"** - Add or remove a custom field value (with mode="add" or mode="delete")
+- `get_custom_field_values` - Get possible values for a custom field in a project
+- `test_case_comments` - Get or create comments for a test case
+  - **method="get"** - Get comments for a test case with pagination
+  - **method="create"** - Create a new comment
+
+## Usage Examples
+
+### Reading Test Cases
+
+```json
+// List all test cases in a project
+{
+  "tool": "test_case_read",
+  "arguments": {
+    "method": "list",
+    "project_id": "1",
+    "page": 0,
+    "size": 10
+  }
+}
+
+// Get a specific test case
+{
+  "tool": "test_case_read",
+  "arguments": {
+    "method": "get",
+    "id": 12345
+  }
+}
+```
+
+### Creating/Updating Resources
+
+```json
+// Create a new test case
+{
+  "tool": "test_case_write",
+  "arguments": {
+    "method": "create",
+    "project_id": "1",
+    "name": "Test Login Functionality",
+    "description": "Verify user can log in",
+    "automated": true
+  }
+}
+
+// Update a launch
+{
+  "tool": "launch_write",
+  "arguments": {
+    "method": "update",
+    "id": 67890,
+    "name": "Sprint 24 Regression",
+    "closed": false
+  }
+}
+```
+
+### Creating Test Case Steps
+
+```json
+// Create a simple text step
+{
+  "tool": "test_case_step_create",
+  "arguments": {
+    "test_case_id": 7476,
+    "text": "Open the login page"
+  }
+}
+
+// Create a step after a specific step ID
+{
+  "tool": "test_case_step_create",
+  "arguments": {
+    "test_case_id": 7476,
+    "text": "Enter valid credentials",
+    "after_id": 20233
+  }
+}
+
+// Create a step with expected result
+{
+  "tool": "test_case_step_create",
+  "arguments": {
+    "test_case_id": 7476,
+    "text": "Click login button",
+    "with_expected_result": true
+  }
+}
+
+// Create a step with custom body_json structure
+{
+  "tool": "test_case_step_create",
+  "arguments": {
+    "test_case_id": 7476,
+    "body_json": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Custom formatted step"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+### Custom Fields
+
+```json
+// Get custom fields for a test case
+{
+  "tool": "test_case_custom_fields",
+  "arguments": {
+    "method": "get",
+    "test_case_id": 12345,
+    "project_id": "1"
+  }
+}
+
+// Add a custom field value
+{
+  "tool": "test_case_custom_fields",
+  "arguments": {
+    "method": "modify",
+    "test_case_id": 12345,
+    "project_id": "1",
+    "custom_field_id": 100,
+    "custom_field_value_id": 200,
+    "mode": "add"
+  }
+}
+```
+
+### Comments
+
+```json
+// Get comments for a test case
+{
+  "tool": "test_case_comments",
+  "arguments": {
+    "method": "get",
+    "test_case_id": 7476,
+    "page": 0,
+    "size": 25
+  }
+}
+
+// Create a new comment
+{
+  "tool": "test_case_comments",
+  "arguments": {
+    "method": "create",
+    "test_case_id": 7476,
+    "body": "This is a test comment"
+  }
+}
+```
 
 ## Features
 
@@ -156,6 +337,7 @@ Add to your `mcp.json` (typically located in `~/.cursor/mcp.json` or similar):
 - ✅ Type-safe tool definitions
 - ✅ Comprehensive error handling
 - ✅ CSV import support for bulk operations
+- ✅ Clean read/write operation separation
 
 ## Project Structure
 
