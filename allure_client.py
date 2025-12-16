@@ -127,6 +127,7 @@ class AllureClient:
         with_expected_result: bool = False
     ) -> Any:
         """Create a test case step
+        POST /api/testcase/step
         
         Args:
             body: Step body containing testCaseId and either bodyJson (for text) or attachmentId
@@ -145,6 +146,42 @@ class AllureClient:
         params['withExpectedResult'] = str(with_expected_result).lower()
         
         return await self.post("/api/testcase/step", body, params)
+    
+    async def update_test_case_step(
+        self,
+        step_id: int,
+        body: Dict[str, Any],
+        after_id: Optional[int] = None,
+        before_id: Optional[int] = None,
+        with_expected_result: bool = False
+    ) -> Any:
+        """Update a test case step
+        PATCH /api/testcase/step/:step_id
+        
+        Args:
+            step_id: ID of the step to update
+            body: Step body with bodyJson (for text) or attachmentId (testCaseId not needed)
+            after_id: Insert step after this step ID (mutually exclusive with before_id)
+            before_id: Insert step before this step ID (mutually exclusive with after_id)
+            with_expected_result: Include expected result section
+        
+        Returns:
+            Updated step object
+        """
+        params = {}
+        if after_id is not None:
+            params['afterId'] = after_id
+        if before_id is not None:
+            params['beforeId'] = before_id
+        params['withExpectedResult'] = str(with_expected_result).lower()
+        
+        return await self.patch(f"/api/testcase/step/{step_id}", body, params)
+    
+    async def delete_test_case_step(self, step_id: int) -> None:
+        """Delete a test case step
+        DELETE /api/testcase/step/:id
+        """
+        await self.delete(f"/api/testcase/step/{step_id}")
     
     async def create_test_case(self, project_id: str, test_case: Dict[str, Any]) -> Any:
         """Create a new test case"""
@@ -285,6 +322,12 @@ class AllureClient:
             "body": body
         }
         return await self.post("/api/comment", comment_body)
+    
+    async def delete_comment(self, comment_id: int) -> None:
+        """Delete a comment
+        DELETE /api/comment/:id
+        """
+        await self.delete(f"/api/comment/{comment_id}")
 
 
 def create_allure_client(base_url: str, token: str) -> AllureClient:

@@ -66,18 +66,24 @@ all_tools: List[Tool] = [
     ),
     
     Tool(
-        name='test_case_step_create',
-        description='Create a text step for a test case.',
+        name='test_case_steps',
+        description='Create, update or delete test case steps. Use method="create" to add a new step, method="update" to modify an existing step, or method="delete" to remove a step.',
         inputSchema={
             'type': 'object',
             'properties': {
-                'test_case_id': {'type': 'number', 'description': 'Test case ID'},
-                'text': {'type': 'string', 'description': 'Step text content'},
+                'method': {
+                    'type': 'string',
+                    'enum': ['create', 'update', 'delete'],
+                    'description': 'Operation to perform: "create" to add a step, "update" to modify a step, "delete" to remove a step'
+                },
+                'test_case_id': {'type': 'number', 'description': 'Test case ID (required for method=create)'},
+                'step_id': {'type': 'number', 'description': 'Step ID (required for method=update and method=delete)'},
+                'text': {'type': 'string', 'description': 'Step text content (required for method=create and method=update)'},
                 'after_id': {'type': 'number', 'description': 'Insert step after this step ID (optional, mutually exclusive with before_id)'},
                 'before_id': {'type': 'number', 'description': 'Insert step before this step ID (optional, mutually exclusive with after_id)'},
                 'with_expected_result': {'type': 'boolean', 'description': 'Include expected result section (default: false)'},
             },
-            'required': ['test_case_id', 'text'],
+            'required': ['method'],
         },
     ),
     
@@ -176,21 +182,22 @@ all_tools: List[Tool] = [
     
     Tool(
         name='test_case_comments',
-        description='Get or create comments for a test case. Use method="get" to retrieve comments, or method="create" to add a new comment.',
+        description='Get, create or delete comments for a test case. Use method="get" to retrieve comments, method="create" to add a new comment, or method="delete" to remove a comment.',
         inputSchema={
             'type': 'object',
             'properties': {
                 'method': {
                     'type': 'string',
-                    'enum': ['get', 'create'],
-                    'description': 'Operation to perform: "get" to retrieve comments, "create" to add a comment'
+                    'enum': ['get', 'create', 'delete'],
+                    'description': 'Operation to perform: "get" to retrieve comments, "create" to add a comment, "delete" to remove a comment'
                 },
-                'test_case_id': {'type': 'number', 'description': 'Test case ID'},
+                'test_case_id': {'type': 'number', 'description': 'Test case ID (required for method=get and method=create)'},
+                'comment_id': {'type': 'number', 'description': 'Comment ID (required for method=delete)'},
                 'body': {'type': 'string', 'description': 'Comment text (required for method=create)'},
                 'page': {'type': 'number', 'description': 'Page number (optional, for method=get)'},
                 'size': {'type': 'number', 'description': 'Page size (optional, for method=get, default 10)'},
             },
-            'required': ['method', 'test_case_id'],
+            'required': ['method'],
         },
     ),
 ]
@@ -365,10 +372,9 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             else:
                 return [TextContent(type="text", text=f"Unknown method for test_cases: {method}")]
         
-        # Test Case Steps - Create step
-        elif name == 'test_case_step_create':
-            test_case_id = arguments.get('test_case_id')
-            text = arguments.get('text')
+        # Test Case Steps - Create, Update, Delete
+        elif name == 'test_case_steps':
+            method = arguments.get('method')
             after_id = arguments.get('after_id')
             before_id = arguments.get('before_id')
             with_expected_result = arguments.get('with_expected_result', False)
@@ -377,33 +383,87 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             if after_id is not None and before_id is not None:
                 return [TextContent(type="text", text="Error: after_id and before_id are mutually exclusive. Provide only one or neither.")]
             
-            # Build body for the request
-            body = {
-                "testCaseId": test_case_id,
-                "bodyJson": {
-                    "type": "doc",
-                    "content": [
-                        {
-                            "type": "paragraph",
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": text
-                                }
-                            ]
-                        }
-                    ]
+            if method == 'create':
+                test_case_id = arguments.get('test_case_id')
+                if not test_case_id:
+                    return [TextContent(type="text", text="Error: 'test_case_id' parameter is required for method=create")]
+                text = arguments.get('text')
+                if not text:
+                    return [TextContent(type="text", text="Error: 'text' parameter is required for method=create")]
+                
+                # Build body for the request
+                body = {
+                    "testCaseId": test_case_id,
+                    "bodyJson": {
+                        "type": "doc",
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                ]
+                            }
+                        ]
+                    }
                 }
-            }
+                
+                # Create the step
+                result = await allure_client.create_test_case_step(
+                    body=body,
+                    after_id=after_id,
+                    before_id=before_id,
+                    with_expected_result=with_expected_result
+                )
+                return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
-            # Create the step
-            result = await allure_client.create_test_case_step(
-                body=body,
-                after_id=after_id,
-                before_id=before_id,
-                with_expected_result=with_expected_result
-            )
-            return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            elif method == 'update':
+                step_id = arguments.get('step_id')
+                if not step_id:
+                    return [TextContent(type="text", text="Error: 'step_id' parameter is required for method=update")]
+                text = arguments.get('text')
+                if not text:
+                    return [TextContent(type="text", text="Error: 'text' parameter is required for method=update")]
+                
+                # Build body for the request (without testCaseId)
+                body = {
+                    "bodyJson": {
+                        "type": "doc",
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": text
+                                    }
+                                ]
+                            }
+                        ]
+                    }
+                }
+                
+                # Update the step
+                result = await allure_client.update_test_case_step(
+                    step_id=step_id,
+                    body=body,
+                    after_id=after_id,
+                    before_id=before_id,
+                    with_expected_result=with_expected_result
+                )
+                return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            
+            elif method == 'delete':
+                step_id = arguments.get('step_id')
+                if not step_id:
+                    return [TextContent(type="text", text="Error: 'step_id' parameter is required for method=delete")]
+                await allure_client.delete_test_case_step(step_id)
+                return [TextContent(type="text", text=f"Step {step_id} deleted successfully")]
+            
+            else:
+                return [TextContent(type="text", text=f"Unknown method for test_case_steps: {method}")]
         
         # Launches - Combined operations
         elif name == 'launches':
@@ -525,20 +585,32 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         # Special operations - Comments
         elif name == 'test_case_comments':
             method = arguments.get('method')
-            test_case_id = arguments.get('test_case_id')
             
             if method == 'get':
+                test_case_id = arguments.get('test_case_id')
+                if not test_case_id:
+                    return [TextContent(type="text", text="Error: 'test_case_id' parameter is required for method=get")]
                 page = arguments.get('page')
                 size = arguments.get('size')
                 result = await allure_client.get_comments(test_case_id, page, size)
                 return [TextContent(type="text", text=json.dumps(result, indent=2))]
             
             elif method == 'create':
+                test_case_id = arguments.get('test_case_id')
+                if not test_case_id:
+                    return [TextContent(type="text", text="Error: 'test_case_id' parameter is required for method=create")]
                 body = arguments.get('body')
                 if not body:
                     return [TextContent(type="text", text="Error: 'body' parameter is required for creating a comment")]
                 result = await allure_client.create_comment(test_case_id, body)
                 return [TextContent(type="text", text=json.dumps(result, indent=2))]
+            
+            elif method == 'delete':
+                comment_id = arguments.get('comment_id')
+                if not comment_id:
+                    return [TextContent(type="text", text="Error: 'comment_id' parameter is required for method=delete")]
+                await allure_client.delete_comment(comment_id)
+                return [TextContent(type="text", text=f"Comment {comment_id} deleted successfully")]
             
             else:
                 return [TextContent(type="text", text=f"Unknown method for test_case_comments: {method}")]
