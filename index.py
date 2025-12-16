@@ -645,7 +645,7 @@ async def main_streamable_http(host: str, port: int):
     # Single global transport instance
     transport = StreamableHTTPServerTransport(
         mcp_session_id=None,
-        is_json_response_enabled=False
+        is_json_response_enabled=True
     )
 
     # Track if server is initialized
