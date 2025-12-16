@@ -637,50 +637,78 @@ async def main_stdio():
 async def main_streamable_http(host: str, port: int):
     """Main function to run the server in Streamable HTTP mode
     
-    Note: Streamable HTTP transport is complex and requires proper session management.
-    For production use, consider using stdio transport or implementing full session lifecycle.
+    Uses one transport instance per session to support multiple concurrent clients.
+    Each session gets its own MCP server instance.
     """
     import uvicorn
+    import uuid
+    from starlette.requests import Request
 
-    # Single global transport instance
-    transport = StreamableHTTPServerTransport(
-        mcp_session_id=None,
-        is_json_response_enabled=True
-    )
+    # Track transports and servers per session
+    sessions = {}  # session_id -> (transport, server_task)
+    sessions_lock = asyncio.Lock()
 
-    # Track if server is initialized
-    server_initialized = asyncio.Event()
-    server_task = None
-
-    async def init_mcp_server():
-        """Initialize MCP server once at startup"""
-        async with transport.connect() as (read_stream, write_stream):
-            server_initialized.set()
-            await server.run(
-                read_stream,
-                write_stream,
-                server.create_initialization_options(),
-                stateless=True
-            )
+    async def get_or_create_session(scope, receive, send):
+        """Get existing session or create a new one"""
+        request = Request(scope, receive)
+        
+        # Try to get session ID from header
+        session_id = request.headers.get("mcp-session-id")
+        
+        # If no session ID, generate a new one
+        if not session_id:
+            session_id = str(uuid.uuid4())
+        
+        async with sessions_lock:
+            if session_id not in sessions:
+                # Create new transport for this session
+                transport = StreamableHTTPServerTransport(
+                    mcp_session_id=session_id,
+                    is_json_response_enabled=True
+                )
+                
+                # Start MCP server for this session
+                async def run_session_server():
+                    try:
+                        async with transport.connect() as (read_stream, write_stream):
+                            await server.run(
+                                read_stream,
+                                write_stream,
+                                server.create_initialization_options(),
+                                stateless=True
+                            )
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        # Cleanup on server exit
+                        async with sessions_lock:
+                            sessions.pop(session_id, None)
+                
+                server_task = asyncio.create_task(run_session_server())
+                sessions[session_id] = (transport, server_task)
+                
+                # Give the server a moment to initialize
+                await asyncio.sleep(0.1)
+            
+            return sessions[session_id][0]
 
     async def asgi_app(scope, receive, send):
         """ASGI application handler"""
-        nonlocal server_task
-
         if scope["type"] == "lifespan":
             while True:
                 message = await receive()
                 if message["type"] == "lifespan.startup":
-                    server_task = asyncio.create_task(init_mcp_server())
-                    await server_initialized.wait()
                     await send({"type": "lifespan.startup.complete"})
                 elif message["type"] == "lifespan.shutdown":
-                    if server_task:
-                        server_task.cancel()
-                        try:
-                            await server_task
-                        except asyncio.CancelledError:
-                            pass
+                    # Cancel all session tasks
+                    async with sessions_lock:
+                        for transport, task in sessions.values():
+                            task.cancel()
+                        
+                        # Wait for all tasks to finish
+                        if sessions:
+                            await asyncio.gather(*[task for _, task in sessions.values()], return_exceptions=True)
+                    
                     await send({"type": "lifespan.shutdown.complete"})
                     return
 
@@ -700,9 +728,7 @@ async def main_streamable_http(host: str, port: int):
                 return
 
             elif path == "/health/readiness":
-                is_ready = server_initialized.is_set()
-
-                status_code = 200 if is_ready else 503
+                status_code = 200
                 await send({
                     "type": "http.response.start",
                     "status": status_code,
@@ -711,15 +737,14 @@ async def main_streamable_http(host: str, port: int):
                 await send({
                     "type": "http.response.body",
                     "body": json.dumps({
-                        "status": "ready" if is_ready else "not_ready",
-                        "server_initialized": server_initialized.is_set(),
+                        "status": "ready",
+                        "active_sessions": len(sessions),
                     }).encode("utf-8"),
                 })
                 return
 
-            if not server_initialized.is_set():
-                await server_initialized.wait()
-
+            # Get or create session and route to appropriate transport
+            transport = await get_or_create_session(scope, receive, send)
             await transport.handle_request(scope, receive, send)
 
     config = uvicorn.Config(
